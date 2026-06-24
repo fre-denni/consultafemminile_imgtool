@@ -10,7 +10,6 @@
 var nOff = 5;
 var pointDensity;
 var overAllTexture;
-var colors;
 
 // ── Stato ───────────────────────────────────────────────────────────────────
 let lastState = "";
@@ -19,19 +18,20 @@ let textureTimer = null;
 // Buffer offscreen per i due livelli di quad
 let layerBehind;
 let layerFront;
-let layersDirty = true;
-
-// Fallback per show_Texture prima che OPC la inizializzi
-// var show_Texture = 1;
 
 // ── Palette ──────────────────────────────────────────────────────────────────
+// Le palette sono ora array diretti di colori: OPC.palette() restituisce
+// l'array selezionato, non un indice numerico.
 const palettes = [
   ["#70c1b3", "#004BAD", "#50514f", "#FED201", "#247ba0"],
   ["#1b1b1b", "#292929", "#f3f3f3", "#222222", "#FED201"],
+  ["#ffffff", "#e4e2d8", "#b39604", "#FED201", "#fbe786"],
   ["#ffffff", "#e2e2ec", "#004BAD", "#0564ff", "#82afff"],
 ];
-const palettesbg = ["#ffffff", "#222222"];
-let palettebg;
+
+// Il colore di sfondo è ora gestito come palette a swatch singolo,
+// così l'utente vede i campioni colorati nel pannello OPC.
+const bgPalettes = [["#ffffff"], ["#222222"]];
 
 function getRandomInt(min, max) {
   min = Math.ceil(min);
@@ -39,8 +39,23 @@ function getRandomInt(min, max) {
   return Math.floor(Math.random() * (max - min) + min);
 }
 
+// ── Helper palette ────────────────────────────────────────────────────────────
+// OPC.palette() salva come window[name] solo il PRIMO colore dell'array scelto
+// (è il comportamento interno di OPC.initVariable → value = options[0]).
+// Per recuperare l'array completo bisogna leggere OPC.options[name].value,
+// che invece contiene l'array intero aggiornato dal picker.
+function getPalette(name) {
+  if (OPC && OPC.options && OPC.options[name]) {
+    const v = OPC.options[name].value;
+    // v può essere già un array (palette multipla) o una stringa (singolo colore)
+    return Array.isArray(v) ? v : [v];
+  }
+  return ["#000000"]; // fallback di sicurezza
+}
+
 /** OPC START **/
-OPC.label("Controllo");
+OPC.title("Controllo");
+
 OPC.slider({
   name: "seed",
   value: getRandomInt(0, 1000),
@@ -88,33 +103,34 @@ OPC.slider({
     "Aumenta (es. 2) o diminuisci (es. 0.5) la fittezza della griglia",
 });
 
-OPC.slider({
-  name: "Color_Front",
-  value: 0,
-  min: 0,
-  max: palettes.length - 1,
-  step: 1,
+// ── REWORK: palette OPC native al posto degli slider numerici ────────────────
+// Ciascuna variabile contiene direttamente l'array di colori attivo.
+// In draw() e buildLayers() si usa palette_Front / palette_Behind / palette_Bg
+// senza passare per indici.
+
+OPC.palette({
+  name: "palette_Front",
+  options: palettes,
+  value: palettes[0],
   label: "Colori primo piano",
 });
 
-OPC.slider({
-  name: "Color_Behind",
-  value: 1,
-  min: 0,
-  max: palettes.length - 1,
-  step: 1,
+OPC.palette({
+  name: "palette_Behind",
+  options: palettes,
+  value: palettes[1],
   label: "Colori secondo piano",
 });
 
-OPC.slider({
-  name: "Color_Bg",
-  value: 1,
-  min: 0,
-  max: palettesbg.length - 1,
-  step: 1,
+OPC.palette({
+  name: "palette_Bg",
+  options: bgPalettes,
+  value: bgPalettes[1],
   label: "Colore di Sfondo",
-  description: "0: bianco, 1:nero",
+  description: "Swatch bianco = sfondo chiaro, nero = sfondo scuro",
 });
+
+// ── Fine rework palette ───────────────────────────────────────────────────────
 
 OPC.slider({
   name: "quad_Width",
@@ -144,22 +160,16 @@ OPC.slider({
   description: "Direzione in cui puntano i blocchi 3D",
 });
 
-OPC.slider({
+OPC.toggle({
   name: "random_Slope",
   value: 0,
-  min: 0,
-  max: 1,
-  step: 1,
   label: "Inclinazione Caotica",
   description: "0 = Uniforme, 1 = Le direzioni diventano casuali e spezzate",
 });
 
-OPC.slider({
+OPC.toggle({
   name: "show_Texture",
   value: 1,
-  min: 0,
-  max: 1,
-  step: 1,
   label: "Filtro Carta",
   description: "0 = Disattivato, 1 = Attivato",
 });
@@ -182,7 +192,7 @@ function setup() {
   setAttributes("willReadFrequently", true);
   createCanvas(canvas_Width, canvas_Height);
   pixelDensity(4);
-  colorMode(HSB, 360, 100, 100, 100);
+  // colorMode RGB (default) — le palette usano stringhe hex, HSB le interpreta male
   background(0);
   frameRate(30);
 }
@@ -204,13 +214,11 @@ function makeFilter() {
   const h = overAllTexture.height;
   const px = overAllTexture.pixels;
 
-  // Sicurezza: leggiamo il valore di OPC (se non è ancora pronto, usiamo 3)
   const tDensity = typeof texture_Density !== "undefined" ? texture_Density : 3;
 
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const idx = (i + j * w) * 4;
-      // Applichiamo tDensity per scalare il rumore
       const n = noise(i / tDensity, j / tDensity, (i * j) / 50);
       const alpha = n * random(5, 15) * 2.55;
       px[idx] = 0;
@@ -223,11 +231,12 @@ function makeFilter() {
 }
 
 // ── Disegna i layer quad su buffer offscreen ──────────────────────────────────
+// REWORK: palette1 e palette2 sono ora gli array di colori hex diretti,
+// non più indici numerici. palette_Bg[0] è il colore di sfondo.
 function buildLayers(palette1, palette2) {
   const W = width;
   const H = height;
 
-  // Sicurezza: leggiamo il valore di OPC
   const pDensity = typeof pattern_Density !== "undefined" ? pattern_Density : 1;
 
   if (!layerBehind || layerBehind.width !== W || layerBehind.height !== H) {
@@ -247,25 +256,20 @@ function buildLayers(palette1, palette2) {
   const pd = pointDensity;
   const qx = pd * quad_Width;
   const qy = pd * quad_Height;
-  //const py = quad_Slope * pd;
 
-  // Se pDensity è 1, il passo è il classico (pd * 2).
-  // Se pDensity aumenta (es. 2), il passo si dimezza, creando molti più quad (più densi).
   const step = (pd * 2) / pDensity;
 
-  // Utilizziamo 'step' al posto di 'pd * 2' nel ciclo del layer Behind
   for (let x = -W * 0.1; x < W * 1.1; x += step) {
     for (let y = -H * 0.1; y < H * 1.1; y += step) {
-      let py = quad_Slope * pd; // Valore base dello slider
+      let py = quad_Slope * pd;
       if (typeof random_Slope !== "undefined" && random_Slope == 1) {
-        // Generiamo un "falso random" basato sulle coordinate in modo che i livelli combacino
         let r = noise(x * 100, y * 100);
-        // Inverte casualmente la direzione (positivo o negativo) mantenendo l'inclinazione intatta
         py = (r > 0.5 ? 1 : -1) * (quad_Slope * pd);
       }
 
       const num = noise((x + nOff) / 10, y / 10);
-      const col = palette1[int(random(1, 5))];
+      // palette1 è ora l'array diretto: palette_Behind
+      const col = palette1[int(random(1, palette1.length))];
       if (num < 0.15) {
         lb.noStroke();
         lb.fill(col);
@@ -293,7 +297,6 @@ function buildLayers(palette1, palette2) {
   lf.drawingContext.shadowOffsetY = 10;
   lf.drawingContext.shadowBlur = 100;
 
-  // Utilizziamo lo stesso 'step' anche per il layer Front
   for (let x = -W * 0.1; x < W * 1.1; x += step) {
     for (let y = -H * 0.1; y < H * 1.1; y += step) {
       let py = quad_Slope * pd;
@@ -303,7 +306,8 @@ function buildLayers(palette1, palette2) {
       }
 
       const num = noise((x + nOff) / 10, y / 10);
-      const col = palette2[int(random(1, 5))];
+      // palette2 è ora l'array diretto: palette_Front
+      const col = palette2[int(random(1, palette2.length))];
       if (num < 0.15) {
         lf.noStroke();
         lf.fill(col);
@@ -323,18 +327,26 @@ function buildLayers(palette1, palette2) {
 
   lf.drawingContext.shadowColor = "transparent";
   lf.drawingContext.shadowBlur = 0;
-  layersDirty = false;
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 function draw() {
-  // Sicurezza per i nuovi slider
   const tDensity = typeof texture_Density !== "undefined" ? texture_Density : 3;
   const pDensity = typeof pattern_Density !== "undefined" ? pattern_Density : 1;
   const rSlope = typeof random_Slope !== "undefined" ? random_Slope : 0;
 
-  // Aggiungiamo rSlope alla stringa di controllo
-  const currentState = `${seed}_${canvas_Width}_${canvas_Height}_${pattern_Size}_${pDensity}_${Color_Front}_${Color_Behind}_${Color_Bg}_${quad_Width}_${quad_Height}_${quad_Slope}_${rSlope}_${show_Texture}_${tDensity}`;
+  // Leggiamo le palette via helper che accede a OPC.options (array completo),
+  // non alla variabile globale window[name] che contiene solo il primo colore.
+  const palette1 = getPalette("palette_Behind");
+  const palette2 = getPalette("palette_Front");
+  const bgPal = getPalette("palette_Bg");
+  const bgColor = bgPal[0];
+
+  const p1key = palette1.join(",");
+  const p2key = palette2.join(",");
+  const bgKey = bgColor;
+
+  const currentState = `${seed}_${canvas_Width}_${canvas_Height}_${pattern_Size}_${pDensity}_${p1key}_${p2key}_${bgKey}_${quad_Width}_${quad_Height}_${quad_Slope}_${rSlope}_${show_Texture}_${tDensity}`;
 
   if (currentState === lastState) return;
   lastState = currentState;
@@ -346,17 +358,13 @@ function draw() {
   randomSeed(seed);
   noiseSeed(seed);
 
-  const palette1 = palettes[Color_Behind];
-  const palette2 = palettes[Color_Front];
-  palettebg = palettesbg[Color_Bg];
-  pointDensity = pattern_Size;
-
   drawingContext.shadowColor = "transparent";
   drawingContext.shadowBlur = 0;
   noStroke();
-  fill(palettebg);
+  fill(bgColor);
   rect(0, 0, width, height);
 
+  pointDensity = pattern_Size;
   buildLayers(palette1, palette2);
 
   image(layerBehind, 0, 0);
@@ -390,26 +398,23 @@ function scheduleTexture() {
     randomSeed(seed);
     noiseSeed(seed);
 
-    // 1. Calcola la nuova texture con la densità aggiornata
     makeFilter();
 
-    // 2. Prepariamo il canvas principale rimuovendo le ombre
     drawingContext.shadowColor = "transparent";
     drawingContext.shadowBlur = 0;
 
-    // 3. FIX: Ridisegniamo tutto da zero per evitare la "doppia" texture
+    const bgColor = getPalette("palette_Bg")[0];
     noStroke();
-    fill(palettebg);
-    rect(0, 0, width, height); // Pulisce lo sfondo
+    fill(bgColor);
+    rect(0, 0, width, height);
 
-    // Ridisegna le geometrie (usiamo i livelli già calcolati, è istantaneo!)
     image(layerBehind, 0, 0);
     image(layerFront, 0, 0);
 
-    // 4. Infine, stampa la nuova texture singola e pulita
     image(overAllTexture, 0, 0);
   }, 300);
 }
+
 // ── Salvataggio ───────────────────────────────────────────────────────────────
 function buttonPressed(name) {
   if (name === "save_webp") {
