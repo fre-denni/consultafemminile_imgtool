@@ -421,12 +421,12 @@ function buttonPressed(name) {
       makeFilter();
       image(overAllTexture, 0, 0);
     }
-    saveCanvas("QuadMosaic", "webp");
+    saveCanvas("img", "webp");
   }
 }
 
 function keyTyped() {
   if (key === "s" || key === "S") {
-    saveCanvas("QuadMosaic", "png");
+    saveCanvas("img", "png");
   }
 }
