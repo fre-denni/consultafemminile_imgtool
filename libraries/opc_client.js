@@ -286,6 +286,47 @@ if (window.OPC || typeof OPC === "function") {
     controlsElem.appendChild(wrapper);
   };
 
+  // ── NUOVO: Title ─────────────────────────────────────────────────────────────
+  // Renders a section heading in the control panel.
+  let _opcCreateTitle = (option, controlsElem) => {
+    let [wrapper, container] = createControlContainer(option.description);
+    wrapper.classList.add("opc-title-wrapper");
+
+    let titleElem = document.createElement("h3");
+    titleElem.classList.add("opc-title");
+    titleElem.textContent = option.value ?? option.name;
+
+    container.appendChild(titleElem);
+    controlsElem.appendChild(wrapper);
+  };
+
+  // ── NUOVO: Label ─────────────────────────────────────────────────────────────
+  // Renders a read-only display value (useful for live stats, computed info, etc.).
+  let _opcCreateLabel = (option, controlsElem) => {
+    let id = "label-" + createId();
+    let [wrapper, container] = createControlContainer(option.description);
+    wrapper.classList.add("opc-label-wrapper");
+
+    let labelName = document.createElement("span");
+    labelName.classList.add("opc-label-name");
+    labelName.textContent = (option.label ?? option.name) + ": ";
+
+    let labelValue = document.createElement("span");
+    labelValue.id = id;
+    labelValue.classList.add("opc-label-value");
+    labelValue.textContent = option.value ?? "";
+
+    // Keep the display in sync when OPC.set() is called externally
+    opcControlEvents[option.name] ||= [];
+    opcControlEvents[option.name].push((v) => {
+      labelValue.textContent = v;
+    });
+
+    container.appendChild(labelName);
+    container.appendChild(labelValue);
+    controlsElem.appendChild(wrapper);
+  };
+
   window.addEventListener("message", (event) => {
     try {
       if (event.data && event.data.messageType === "OPC") {
@@ -327,6 +368,12 @@ if (window.OPC || typeof OPC === "function") {
           break;
         case "select":
           _opcCreateSelect(option, controlsElem);
+          break;
+        case "title":
+          _opcCreateTitle(option, controlsElem);
+          break;
+        case "label":
+          _opcCreateLabel(option, controlsElem);
           break;
         default:
           console.warn(`OPC Control type ${option.type} not supported`);
