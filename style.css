@@ -1,0 +1,42 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden; /* evita scrollbar quando il canvas è grande */
+}
+
+/* ── Pannello OPC: ancorato in alto a destra ─────────────────────────────── */
+#opc-control-panel {
+  position: fixed !important;
+  top: 20px !important;
+  right: 20px !important;
+  left: auto !important;
+  bottom: auto !important;
+  width: 400px;
+
+  /* Altezza massima con scroll interno se i controlli non entrano */
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+
+  /* Scrollbar sottile su webkit */
+  scrollbar-width: thin;
+}
+
+#opc-control-panel .opc-control {
+  padding: 0;
+}
+
+#opc-control-panel input[type="number"] {
+  width: 4em !important;
+}
+
+#opc-client::-webkit-scrollbar {
+  width: 4px;
+}
+#opc-client::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
